@@ -17,7 +17,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "granja_segura_2024_v2")
+app.secret_key = "granja_segura_2024_v2"
 app.config['JSON_AS_ASCII'] = False
 
 DB = "granja.db"
@@ -129,6 +129,12 @@ def init_db():
         precio_unitario REAL NOT NULL,
         total REAL NOT NULL,
         estado TEXT DEFAULT 'ACTIVA' CHECK(estado IN ('ACTIVA', 'ANULADA')),
+        estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
+        abono REAL DEFAULT 0,
+        fecha_pago TEXT,
+        estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
+        monto_pagado REAL DEFAULT 0,
+        fecha_pago TEXT,
         factura_numero TEXT,
         usuario_id INTEGER,
         FOREIGN KEY (producto_id) REFERENCES productos(id),
@@ -584,12 +590,15 @@ def ventas():
 
             factura = get_factura_numero()
             c.execute("""
-                INSERT INTO ventas (fecha, producto_id, cliente_id, cantidad, precio_unitario, total, factura_numero, usuario_id)
-                VALUES (?,?,?,?,?,?,?,?)
+                INSERT INTO ventas (fecha, producto_id, cliente_id, cantidad, precio_unitario, total, estado_pago, fecha_pago, factura_numero, usuario_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
             """, (
                 request.form.get('fecha', date.today().isoformat()),
                 producto_id, request.form.get('cliente') or None,
-                cantidad, precio, total, factura, get_user_id()
+                cantidad, precio, total,
+                request.form.get('estado_pago', 'PENDIENTE'),
+                request.form.get('fecha_pago', '') or None,
+                factura, get_user_id()
             ))
             conn.commit()
             flash(f"Venta registrada. Factura: {factura}", "success")
@@ -605,7 +614,7 @@ def ventas():
         LEFT JOIN clientes c ON v.cliente_id = c.id ORDER BY v.id DESC
     """).fetchall()
     conn.close()
-    return render_template("ventas.html", data=data, productos=productos, clientes=clientes_list)
+    return render_template("ventas.html", data=data, productos=productos, clientes=clientes_list, pendientes=pendientes)
 
 @app.route('/ventas/editar/<int:id>', methods=['GET', 'POST'])
 @admin_required
@@ -639,6 +648,86 @@ def anular_venta(id):
     conn.close()
     flash("Venta anulada", "warning")
     return redirect(url_for('ventas'))
+
+@app.route('/ventas/pagar/<int:id>', methods=['GET', 'POST'])
+@admin_required
+def registrar_pago(id):
+    conn = get_db()
+    c = conn.cursor()
+
+    venta = c.execute("SELECT * FROM ventas WHERE id=?", (id,)).fetchone()
+    if not venta:
+        flash("Venta no encontrada", "danger")
+        return redirect(url_for('ventas'))
+
+    if request.method == 'POST':
+        try:
+            monto = float(request.form['monto'])
+            fecha_pago = request.form.get('fecha_pago', date.today().isoformat())
+
+            nuevo_abono = (venta['abono'] or 0) + monto
+            nuevo_saldo = venta['total'] - nuevo_abono
+
+            if nuevo_saldo <= 0:
+                estado_pago = 'PAGADO'
+                nuevo_saldo = 0
+            else:
+                estado_pago = 'PARCIAL'
+
+            c.execute('''UPDATE ventas SET abono=?, saldo=?, estado_pago=?, fecha_pago=? WHERE id=?''',
+                      (nuevo_abono, nuevo_saldo, estado_pago, fecha_pago, id))
+            conn.commit()
+            flash(f"Pago registrado: ${monto:,.2f}. Saldo restante: ${nuevo_saldo:,.2f}", "success")
+        except Exception as e:
+            flash(f"Error: {str(e)}", "danger")
+        return redirect(url_for('ventas'))
+
+    conn.close()
+    return render_template("registrar_pago.html", venta=venta)
+
+@app.route('/ventas/pagar/<int:id>')
+@admin_required
+def marcar_pagado(id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE ventas SET estado_pago='PAGADO', fecha_pago=? WHERE id=?", 
+              (date.today().isoformat(), id))
+    conn.commit()
+    conn.close()
+    flash("Venta marcada como PAGADA", "success")
+    return redirect(url_for('ventas'))
+
+@app.route('/ventas/pago/<int:id>', methods=['GET', 'POST'])
+@admin_required
+def actualizar_pago(id):
+    conn = get_db()
+    c = conn.cursor()
+    venta = c.execute("SELECT * FROM ventas WHERE id=?", (id,)).fetchone()
+
+    if request.method == 'POST':
+        try:
+            estado_pago = request.form['estado_pago']
+            monto_pagado = float(request.form.get('monto_pagado', 0))
+            fecha_pago = request.form.get('fecha_pago')
+
+            if estado_pago == 'PAGADO':
+                monto_pagado = venta['total']
+                if not fecha_pago:
+                    fecha_pago = date.today().isoformat()
+            elif estado_pago == 'PENDIENTE':
+                monto_pagado = 0
+                fecha_pago = None
+
+            c.execute('''UPDATE ventas SET estado_pago=?, monto_pagado=?, fecha_pago=? WHERE id=?''',
+                      (estado_pago, monto_pagado, fecha_pago, id))
+            conn.commit()
+            flash(f"Estado de pago actualizado a: {estado_pago}", "success")
+            return redirect(url_for('ventas'))
+        except Exception as e:
+            flash(f"Error: {str(e)}", "danger")
+
+    conn.close()
+    return render_template("actualizar_pago.html", venta=venta)
 
 # ========================
 # FACTURA
@@ -958,9 +1047,35 @@ def reportes():
     """, (fecha_inicio, fecha_fin)).fetchall()
 
     conn.close()
+    # Ventas pendientes de pago
+    ventas_pendientes = c.execute('''
+        SELECT v.*, p.nombre as producto, c.nombre as cliente
+        FROM ventas v 
+        JOIN productos p ON v.producto_id = p.id
+        LEFT JOIN clientes c ON v.cliente_id = c.id
+        WHERE v.estado='ACTIVA' AND v.estado_pago='PENDIENTE'
+        ORDER BY v.fecha DESC
+    ''').fetchall()
+
+    total_pendiente = sum(v['total'] for v in ventas_pendientes) if ventas_pendientes else 0
+
+    conn.close()
+    # Ventas a credito (pendientes y parciales)
+    ventas_credito = c.execute("""
+        SELECT v.*, p.nombre as producto, c.nombre as cliente
+        FROM ventas v
+        JOIN productos p ON v.producto_id = p.id
+        LEFT JOIN clientes c ON v.cliente_id = c.id
+        WHERE v.estado='ACTIVA' AND v.estado_pago IN ('PENDIENTE', 'PARCIAL')
+        ORDER BY v.fecha DESC
+    """).fetchall()
+    
+    total_por_cobrar = sum(v['total'] - (v['abono'] or 0) for v in ventas_credito)
+    
     return render_template("reportes.html", ventas_prod=ventas_prod, costos_cat=costos_cat,
                            total_ventas=total_ventas, total_costos=total_costos, ganancia=ganancia,
-                           top_clientes=top_clientes, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
+                           top_clientes=top_clientes, ventas_pendientes=ventas_pendientes,
+                           total_pendiente=total_pendiente, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
 
 # ========================
 # GRÁFICAS
@@ -1174,5 +1289,9 @@ def toggle_usuario(id):
     return redirect(url_for('usuarios'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    print("="*50)
+    print("GRANJA APP - Servidor iniciado")
+    print("Accede desde esta PC: http://localhost:5000")
+    print("Accede desde tu celular (misma WiFi): http://<IP-de-tu-PC>:5000")
+    print("="*50)
+    app.run(debug=True, host='0.0.0.0', port=5000)
