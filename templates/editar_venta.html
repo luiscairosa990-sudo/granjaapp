@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Editar Venta - GranjaApp{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">Editar Venta #{{ venta.id }}</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" name="fecha" class="form-control" value="{{ venta.fecha }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Producto</label>
+                        <select name="producto" class="form-select" required>
+                            {% for p in productos %}
+                            <option value="{{ p.id }}" {% if p.id == venta.producto_id %}selected{% endif %}>{{ p.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cliente</label>
+                        <select name="cliente" class="form-select">
+                            <option value="">Consumidor Final</option>
+                            {% for c in clientes %}
+                            <option value="{{ c.id }}" {% if c.id == venta.cliente_id %}selected{% endif %}>{{ c.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cantidad</label>
+                        <input type="number" step="0.01" name="cantidad" class="form-control" value="{{ venta.cantidad }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Precio Unitario</label>
+                        <input type="number" step="0.01" name="precio" class="form-control" value="{{ venta.precio_unitario }}" required>
+                    </div>
+                    <button type="submit" class="btn btn-warning">Actualizar</button>
+                    <a href="{{ url_for('ventas') }}" class="btn btn-outline-secondary">Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

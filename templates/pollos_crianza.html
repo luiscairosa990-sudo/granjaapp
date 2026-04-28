@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Crianza - GranjaApp{% endblock %}
+{% block content %}
+{% if session.rol == 'admin' %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Nuevo Lote</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Código de Lote *</label>
+                        <input type="text" name="lote" class="form-control" placeholder="Ej: LOTE-001" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Fecha Ingreso</label>
+                        <input type="date" name="fecha" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cantidad Inicial</label>
+                        <input type="number" name="cantidad" class="form-control" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Peso Inicial (g)</label>
+                        <input type="number" step="0.01" name="peso" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Costo Pollitos ($)</label>
+                        <input type="number" step="0.01" name="costo" class="form-control" value="0">
+                    </div>
+                    <button type="submit" class="btn btn-info w-100 text-white">Guardar Lote</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+{% else %}
+<div class="row">
+    <div class="col-12">
+{% endif %}
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h5 class="mb-0">Lotes de Crianza</h5>
+                {% if session.rol == 'admin' %}
+                <a href="{{ url_for('exportar', tabla='pollos_crianza') }}" class="btn btn-sm btn-outline-success">
+                    <i class="bi bi-file-earmark-excel"></i> Excel
+                </a>
+                {% endif %}
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Lote</th>
+                                <th>Fecha</th>
+                                <th>Inicial</th>
+                                <th>Actual</th>
+                                <th>Peso Inicial</th>
+                                <th>Estado</th>
+                                <th width="180">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in data %}
+                            <tr>
+                                <td><strong>{{ d.lote }}</strong></td>
+                                <td>{{ d.fecha_ingreso }}</td>
+                                <td>{{ d.cantidad_inicial }}</td>
+                                <td>{{ d.cantidad_actual }}</td>
+                                <td>{{ d.peso_inicial }}g</td>
+                                <td>
+                                    {% if d.estado == 'ACTIVO' %}
+                                        <span class="badge bg-success">Activo</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Finalizado</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{{ url_for('control_peso', crianza_id=d.id) }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-graph-up"></i> Control
+                                    </a>
+                                    {% if session.rol == 'admin' %}
+                                    {% if d.estado == 'ACTIVO' %}
+                                    <a href="{{ url_for('pasar_listo', crianza_id=d.id) }}" class="btn btn-sm btn-outline-success">
+                                        <i class="bi bi-check-circle"></i> Listo
+                                    </a>
+                                    {% endif %}
+                                    <a href="{{ url_for('eliminar_crianza', id=d.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar lote completo?')">
+                                        <i class="bi bi-trash"></i>
+                                    </a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

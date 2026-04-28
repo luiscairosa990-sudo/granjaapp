@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Ventas - GranjaApp{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Nueva Venta</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="ventaForm">
+                    <div class="mb-3">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" name="fecha" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Producto</label>
+                        <select name="producto" id="producto" class="form-select" required>
+                            {% for p in productos %}
+                            <option value="{{ p.id }}">{{ p.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">Disponible: <span id="stockDisp" class="fw-bold">-</span></small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cliente</label>
+                        <select name="cliente" class="form-select">
+                            <option value="">Consumidor Final</option>
+                            {% for c in clientes %}
+                            <option value="{{ c.id }}">{{ c.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cantidad</label>
+                        <input type="number" step="0.01" name="cantidad" id="cantidad" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Precio Unitario ($)</label>
+                        <input type="number" step="0.01" name="precio" id="precio" class="form-control" required>
+                    </div>
+                    <div class="alert alert-light border">
+                        <strong>Total: $<span id="totalVenta">0.00</span></strong>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Registrar Venta</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h5 class="mb-0">Historial de Ventas</h5>
+                <a href="{{ url_for('exportar', tabla='ventas') }}" class="btn btn-sm btn-outline-success">
+                    <i class="bi bi-file-earmark-excel"></i> Excel
+                </a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Factura</th>
+                                <th>Fecha</th>
+                                <th>Producto</th>
+                                <th>Cliente</th>
+                                <th>Cant.</th>
+                                <th>Precio</th>
+                                <th>Total</th>
+                                <th>Estado</th>
+                                <th width="120">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in data %}
+                            <tr class="{% if d.estado == 'ANULADA' %}table-secondary{% endif %}">
+                                <td><small class="font-monospace">{{ d.factura_numero }}</small></td>
+                                <td>{{ d.fecha }}</td>
+                                <td>{{ d.producto }}</td>
+                                <td>{{ d.cliente or 'N/A' }}</td>
+                                <td>{{ d.cantidad }} {{ d.unidad }}</td>
+                                <td>${{ "{:,.2f}".format(d.precio_unitario) }}</td>
+                                <td><strong>${{ "{:,.2f}".format(d.total) }}</strong></td>
+                                <td>
+                                    {% if d.estado == 'ACTIVA' %}
+                                        <span class="badge bg-success">Activa</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Anulada</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if d.estado == 'ACTIVA' %}
+                                    <a href="{{ url_for('factura', id=d.id) }}" class="btn btn-sm btn-outline-primary" title="Factura">
+                                        <i class="bi bi-file-earmark-pdf"></i>
+                                    </a>
+                                    <a href="{{ url_for('editar_venta', id=d.id) }}" class="btn btn-sm btn-outline-warning" title="Editar">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                    <a href="{{ url_for('anular_venta', id=d.id) }}" class="btn btn-sm btn-outline-danger" title="Anular" onclick="return confirm('¿Anular esta venta?')">
+                                        <i class="bi bi-x-circle"></i>
+                                    </a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+document.getElementById('cantidad').addEventListener('input', calcularTotal);
+document.getElementById('precio').addEventListener('input', calcularTotal);
+document.getElementById('producto').addEventListener('change', actualizarStock);
+function calcularTotal() {
+    const cantidad = parseFloat(document.getElementById('cantidad').value) || 0;
+    const precio = parseFloat(document.getElementById('precio').value) || 0;
+    document.getElementById('totalVenta').textContent = (cantidad * precio).toFixed(2);
+}
+function actualizarStock() {
+    const productoId = document.getElementById('producto').value;
+    fetch(`/api/stock/${productoId}`)
+        .then(r => r.json())
+        .then(data => { document.getElementById('stockDisp').textContent = data.disponible; });
+}
+actualizarStock();
+</script>
+{% endblock %}

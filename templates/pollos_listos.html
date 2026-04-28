@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Pollos Listos - GranjaApp{% endblock %}
+{% block content %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white d-flex justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-box-seam"></i> Pollos Listos para Venta</h5>
+        <a href="{{ url_for('exportar', tabla='pollos_listos') }}" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-file-earmark-excel"></i> Excel
+        </a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Lote</th>
+                        <th>Fecha Listo</th>
+                        <th>Cantidad</th>
+                        <th>Peso Prom.</th>
+                        <th>Costo Total</th>
+                        <th>Precio Venta</th>
+                        <th>Estado</th>
+                        <th>Ganancia Est.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                    <tr>
+                        <td><strong>{{ d.lote }}</strong></td>
+                        <td>{{ d.fecha_listo }}</td>
+                        <td>{{ d.cantidad }}</td>
+                        <td>{{ d.peso_promedio }}g</td>
+                        <td>${{ "{:,.2f}".format(d.costo_total) }}</td>
+                        <td>${{ "{:,.2f}".format(d.precio_venta_unitario) }}</td>
+                        <td>
+                            {% if d.estado == 'DISPONIBLE' %}
+                                <span class="badge bg-success">Disponible</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Vendido</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set ganancia = (d.cantidad * d.precio_venta_unitario) - d.costo_total %}
+                            <span class="{% if ganancia >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                ${{ "{:,.2f}".format(ganancia) }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

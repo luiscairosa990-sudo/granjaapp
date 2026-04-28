@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Control de Peso - GranjaApp{% endblock %}
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('pollos_crianza') }}">Crianza</a></li>
+                <li class="breadcrumb-item active">Lote {{ crianza.lote }}</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center p-3">
+                <h6 class="text-muted small">Cantidad Inicial</h6>
+                <h4 class="fw-bold">{{ crianza.cantidad_inicial }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center p-3">
+                <h6 class="text-muted small">Cantidad Actual</h6>
+                <h4 class="fw-bold text-success">{{ crianza.cantidad_actual }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center p-3">
+                <h6 class="text-muted small">Mortalidad Total</h6>
+                <h4 class="fw-bold text-danger">{{ crianza.cantidad_inicial - crianza.cantidad_actual }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center p-3">
+                <h6 class="text-muted small">Peso Inicial</h6>
+                <h4 class="fw-bold">{{ crianza.peso_inicial }}g</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Registrar Semana</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Fecha</label>
+                        <input type="date" name="fecha" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Semana #</label>
+                        <input type="number" name="semana" class="form-control" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Peso Promedio (g)</label>
+                        <input type="number" step="0.01" name="peso" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cantidad Viva</label>
+                        <input type="number" name="cantidad_viva" class="form-control" max="{{ crianza.cantidad_actual }}" required>
+                        <small class="text-muted">Actual: {{ crianza.cantidad_actual }}</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Alimento Consumido (kg)</label>
+                        <input type="number" step="0.01" name="alimento" class="form-control" value="0">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Guardar Control</button>
+                </form>
+            </div>
+        </div>
+        {% if session.rol == 'admin' %}
+        <div class="mt-3">
+            <a href="{{ url_for('costos_preparacion', crianza_id=crianza_id) }}" class="btn btn-outline-secondary w-100">
+                <i class="bi bi-cash-stack"></i> Costos de Preparación
+            </a>
+        </div>
+        {% endif %}
+    </div>
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 mb-3">
+            <div class="card-header bg-white"><h5 class="mb-0">Evolución del Peso</h5></div>
+            <div class="card-body">
+                <canvas id="pesoChart" height="200"></canvas>
+            </div>
+        </div>
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h5 class="mb-0">Historial Semanal</h5>
+                {% if session.rol == 'admin' %}
+                <a href="{{ url_for('exportar', tabla='control_peso') }}" class="btn btn-sm btn-outline-success">
+                    <i class="bi bi-file-earmark-excel"></i> Excel
+                </a>
+                {% endif %}
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Semana</th><th>Fecha</th><th>Peso (g)</th><th>Vivos</th><th>Mortalidad</th><th>Alim. (kg)</th><th>Registró</th>{% if session.rol == 'admin' %}<th>Acciones</th>{% endif %}</tr>
+                        </thead>
+                        <tbody>
+                            {% for d in data %}
+                            <tr>
+                                <td><span class="badge bg-primary">Sem {{ d.semana }}</span></td>
+                                <td>{{ d.fecha }}</td>
+                                <td><strong>{{ d.peso_promedio }}</strong></td>
+                                <td>{{ d.cantidad_viva }}</td>
+                                <td>{% if d.mortalidad > 0 %}<span class="text-danger">-{{ d.mortalidad }}</span>{% else %}0{% endif %}</td>
+                                <td>{{ d.alimento_consumido_kg }}</td>
+                                <td><small class="text-muted">{{ d.usuario or '-' }}</small></td>
+                                {% if session.rol == 'admin' %}
+                                <td>
+                                    <a href="{{ url_for('eliminar_control', id=d.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar?')">
+                                        <i class="bi bi-trash"></i>
+                                    </a>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+fetch(`/api/crianza/{{ crianza_id }}`)
+    .then(r => r.json())
+    .then(data => {
+        const semanas = data.map(d => 'Sem ' + d.semana);
+        const pesos = data.map(d => d.peso_promedio);
+        new Chart(document.getElementById('pesoChart'), {
+            type: 'line',
+            data: {
+                labels: semanas,
+                datasets: [{
+                    label: 'Peso Promedio (g)',
+                    data: pesos,
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    });
+</script>
+{% endblock %}

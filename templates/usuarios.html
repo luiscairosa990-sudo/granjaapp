@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Usuarios - GranjaApp{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-people"></i> Gestión de Usuarios</h5>
+                <a href="{{ url_for('nuevo_usuario') }}" class="btn btn-sm btn-success">
+                    <i class="bi bi-plus-circle"></i> Nuevo Usuario
+                </a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for u in data %}
+                            <tr>
+                                <td><strong>{{ u.username }}</strong></td>
+                                <td>{{ u.nombre }}</td>
+                                <td>
+                                    {% if u.rol == 'admin' %}
+                                        <span class="badge bg-danger">Administrador</span>
+                                    {% else %}
+                                        <span class="badge bg-info">Operario</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if u.activo %}
+                                        <span class="badge bg-success">Activo</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactivo</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{{ url_for('toggle_usuario', id=u.id) }}" class="btn btn-sm btn-outline-warning">
+                                        {% if u.activo %}<i class="bi bi-pause-circle"></i> Desactivar{% else %}<i class="bi bi-play-circle"></i> Activar{% endif %}
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

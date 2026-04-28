@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Reportes - GranjaApp{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <form method="GET" class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label">Fecha Inicio</label>
+                        <input type="date" name="inicio" class="form-control" value="{{ fecha_inicio }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Fecha Fin</label>
+                        <input type="date" name="fin" class="form-control" value="{{ fecha_fin }}">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-funnel"></i> Filtrar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm bg-success text-white">
+            <div class="card-body text-center">
+                <h6 class="opacity-75">TOTAL VENTAS</h6>
+                <h2 class="fw-bold">${{ "{:,.2f}".format(total_ventas) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm bg-danger text-white">
+            <div class="card-body text-center">
+                <h6 class="opacity-75">TOTAL COSTOS</h6>
+                <h2 class="fw-bold">${{ "{:,.2f}".format(total_costos) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm {% if ganancia >= 0 %}bg-primary{% else %}bg-warning text-dark{% endif %} text-white">
+            <div class="card-body text-center">
+                <h6 class="opacity-75">GANANCIA / PÉRDIDA</h6>
+                <h2 class="fw-bold">${{ "{:,.2f}".format(ganancia) }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white"><h5 class="mb-0">Ventas por Producto</h5></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light"><tr><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead>
+                        <tbody>
+                            {% for v in ventas_prod %}
+                            <tr><td><strong>{{ v.nombre }}</strong></td><td>{{ v.cantidad }}</td><td class="text-success fw-bold">${{ "{:,.2f}".format(v.total) }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white"><h5 class="mb-0">Costos por Categoría</h5></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light"><tr><th>Categoría</th><th>Total</th></tr></thead>
+                        <tbody>
+                            {% for c in costos_cat %}
+                            <tr><td>{{ c.categoria }}</td><td class="text-danger fw-bold">${{ "{:,.2f}".format(c.total) }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white"><h5 class="mb-0">Top Clientes</h5></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light"><tr><th>#</th><th>Cliente</th><th>Total Comprado</th></tr></thead>
+                        <tbody>
+                            {% for c in top_clientes %}
+                            <tr><td>{{ loop.index }}</td><td>{{ c.nombre }}</td><td class="text-success fw-bold">${{ "{:,.2f}".format(c.total) }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col text-center">
+        <img src="{{ url_for('grafica_costos_ventas') }}" class="img-fluid rounded shadow-sm" style="max-height: 400px;">
+    </div>
+</div>
+{% endblock %}

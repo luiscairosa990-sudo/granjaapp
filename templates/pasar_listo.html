@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Pasar a Listos - GranjaApp{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-check-circle"></i> Lote Listo para Venta</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Lote:</strong> {{ crianza.lote }}<br>
+                    <strong>Ingreso:</strong> {{ crianza.fecha_ingreso }}<br>
+                    <strong>Inicial:</strong> {{ crianza.cantidad_inicial }} pollos<br>
+                    <strong>Actual:</strong> {{ crianza.cantidad_actual }} pollos<br>
+                    {% if ultimo %}
+                    <strong>Último Peso:</strong> {{ ultimo.peso_promedio }}g (Sem {{ ultimo.semana }})
+                    {% endif %}
+                </div>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Cantidad para Venta</label>
+                        <input type="number" name="cantidad" class="form-control" max="{{ crianza.cantidad_actual }}" value="{{ crianza.cantidad_actual }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Peso Promedio Final (g)</label>
+                        <input type="number" step="0.01" name="peso" class="form-control" value="{{ ultimo.peso_promedio if ultimo else crianza.peso_inicial }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Precio de Venta Unitario ($)</label>
+                        <input type="number" step="0.01" name="precio" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Confirmar y Pasar a Disponible</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
