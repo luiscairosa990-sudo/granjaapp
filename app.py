@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.secret_key = "granja_segura_2024_v2"
 app.config['JSON_AS_ASCII'] = False
 
-DB = "granja.db"
+DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "granja.db")
 
 def get_db():
     conn = sqlite3.connect(DB)
@@ -214,6 +214,12 @@ def init_db():
     conn.close()
 
 init_db()
+
+@app.before_request
+def before_request():
+    # Asegurar que la base de datos existe antes de cada request
+    if not os.path.exists(DB):
+        init_db()
 
 # ========================
 # UTILIDADES

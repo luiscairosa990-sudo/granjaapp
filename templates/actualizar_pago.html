@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Actualizar Pago - GranjaApp{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-cash-coin"></i> Actualizar Estado de Pago</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Factura:</strong> {{ venta.factura_numero }}<br>
+                    <strong>Total:</strong> ${{ "{:,.2f}".format(venta.total) }}<br>
+                    <strong>Estado actual:</strong> 
+                    {% if venta.estado_pago == 'PENDIENTE' %}
+                        <span class="badge bg-warning text-dark">PENDIENTE</span>
+                    {% elif venta.estado_pago == 'PARCIAL' %}
+                        <span class="badge bg-info">PARCIAL</span>
+                    {% else %}
+                        <span class="badge bg-success">PAGADO</span>
+                    {% endif %}
+                    {% if venta.monto_pagado > 0 %}
+                        <br><strong>Monto pagado:</strong> ${{ "{:,.2f}".format(venta.monto_pagado) }}
+                    {% endif %}
+                    {% if venta.fecha_pago %}
+                        <br><strong>Fecha de pago:</strong> {{ venta.fecha_pago }}
+                    {% endif %}
+                </div>
+
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Estado de Pago</label>
+                        <select name="estado_pago" id="estado_pago" class="form-select" required onchange="toggleCampos()">
+                            <option value="PENDIENTE" {% if venta.estado_pago == 'PENDIENTE' %}selected{% endif %}>PENDIENTE - Aún no paga</option>
+                            <option value="PARCIAL" {% if venta.estado_pago == 'PARCIAL' %}selected{% endif %}>PARCIAL - Abonó algo</option>
+                            <option value="PAGADO" {% if venta.estado_pago == 'PAGADO' %}selected{% endif %}>PAGADO - Cancelado total</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="monto_pagado_div" style="{% if venta.estado_pago != 'PARCIAL' %}display:none{% endif %}">
+                        <label class="form-label">Monto Pagado ($)</label>
+                        <input type="number" step="0.01" name="monto_pagado" id="monto_pagado" class="form-control" 
+                               value="{{ venta.monto_pagado or 0 }}" max="{{ venta.total }}">
+                        <small class="text-muted">Total a pagar: ${{ "{:,.2f}".format(venta.total) }}</small>
+                    </div>
+
+                    <div class="mb-3" id="fecha_pago_div" style="{% if venta.estado_pago != 'PAGADO' %}display:none{% endif %}">
+                        <label class="form-label">Fecha de Pago</label>
+                        <input type="date" name="fecha_pago" id="fecha_pago" class="form-control" 
+                               value="{{ venta.fecha_pago or '' }}">
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Actualizar Pago</button>
+                    <a href="{{ url_for('ventas') }}" class="btn btn-outline-secondary w-100 mt-2">Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+function toggleCampos() {
+    const estado = document.getElementById('estado_pago').value;
+    const montoDiv = document.getElementById('monto_pagado_div');
+    const fechaDiv = document.getElementById('fecha_pago_div');
+
+    if (estado === 'PARCIAL') {
+        montoDiv.style.display = 'block';
+        fechaDiv.style.display = 'none';
+    } else if (estado === 'PAGADO') {
+        montoDiv.style.display = 'none';
+        fechaDiv.style.display = 'block';
+        document.getElementById('fecha_pago').value = new Date().toISOString().split('T')[0];
+    } else {
+        montoDiv.style.display = 'none';
+        fechaDiv.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}

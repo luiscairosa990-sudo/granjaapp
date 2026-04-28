@@ -38,6 +38,17 @@
                         <label class="form-label">Precio Unitario</label>
                         <input type="number" step="0.01" name="precio" class="form-control" value="{{ venta.precio_unitario }}" required>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Estado de Pago</label>
+                        <select name="estado_pago" class="form-select">
+                            <option value="PENDIENTE" {% if venta.estado_pago=='PENDIENTE' %}selected{% endif %}>Pendiente (A crédito)</option>
+                            <option value="PAGADO" {% if venta.estado_pago=='PAGADO' %}selected{% endif %}>Pagado</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Fecha de Pago (si ya pagó)</label>
+                        <input type="date" name="fecha_pago" class="form-control" value="{{ venta.fecha_pago or '' }}">
+                    </div>
                     <button type="submit" class="btn btn-warning">Actualizar</button>
                     <a href="{{ url_for('ventas') }}" class="btn btn-outline-secondary">Cancelar</a>
                 </form>
