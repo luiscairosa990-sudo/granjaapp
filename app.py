@@ -131,6 +131,8 @@ def init_db():
         estado TEXT DEFAULT 'ACTIVA' CHECK(estado IN ('ACTIVA', 'ANULADA')),
         estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         abono REAL DEFAULT 0,
+        fecha_pago TEXT,
+        estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         monto_pagado REAL DEFAULT 0,
         fecha_pago TEXT,
         factura_numero TEXT,
@@ -617,8 +619,16 @@ def ventas():
         FROM ventas v JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id ORDER BY v.id DESC
     """).fetchall()
+    # Ventas pendientes de pago para mostrar alertas
+    ventas_pendientes = c.execute("""
+        SELECT v.*, p.nombre as producto, c.nombre as cliente
+        FROM ventas v JOIN productos p ON v.producto_id = p.id
+        LEFT JOIN clientes c ON v.cliente_id = c.id
+        WHERE v.estado='ACTIVA' AND v.estado_pago IN ('PENDIENTE', 'PARCIAL')
+        ORDER BY v.fecha DESC
+    """).fetchall()
     conn.close()
-    return render_template("ventas.html", data=data, productos=productos, clientes=clientes_list, pendientes=pendientes)
+    return render_template("ventas.html", data=data, productos=productos, clientes=clientes_list, pendientes=ventas_pendientes)
 
 @app.route('/ventas/editar/<int:id>', methods=['GET', 'POST'])
 @admin_required
@@ -674,12 +684,12 @@ def registrar_pago(id):
 
             if nuevo_saldo <= 0:
                 estado_pago = 'PAGADO'
-                nuevo_saldo = 0
+                nuevo_abono = venta['total']
             else:
                 estado_pago = 'PARCIAL'
 
-            c.execute('''UPDATE ventas SET abono=?, saldo=?, estado_pago=?, fecha_pago=? WHERE id=?''',
-                      (nuevo_abono, nuevo_saldo, estado_pago, fecha_pago, id))
+            c.execute('''UPDATE ventas SET abono=?, estado_pago=?, fecha_pago=? WHERE id=?''',
+                      (nuevo_abono, estado_pago, fecha_pago, id))
             conn.commit()
             flash(f"Pago registrado: ${monto:,.2f}. Saldo restante: ${nuevo_saldo:,.2f}", "success")
         except Exception as e:
@@ -689,7 +699,7 @@ def registrar_pago(id):
     conn.close()
     return render_template("registrar_pago.html", venta=venta)
 
-@app.route('/ventas/pagar/<int:id>')
+@app.route('/ventas/marcar_pagado/<int:id>')
 @admin_required
 def marcar_pagado(id):
     conn = get_db()
@@ -1050,7 +1060,6 @@ def reportes():
         GROUP BY c.nombre ORDER BY total DESC LIMIT 5
     """, (fecha_inicio, fecha_fin)).fetchall()
 
-    conn.close()
     # Ventas pendientes de pago
     ventas_pendientes = c.execute('''
         SELECT v.*, p.nombre as producto, c.nombre as cliente
@@ -1063,7 +1072,6 @@ def reportes():
 
     total_pendiente = sum(v['total'] for v in ventas_pendientes) if ventas_pendientes else 0
 
-    conn.close()
     # Ventas a credito (pendientes y parciales)
     ventas_credito = c.execute("""
         SELECT v.*, p.nombre as producto, c.nombre as cliente
@@ -1073,13 +1081,16 @@ def reportes():
         WHERE v.estado='ACTIVA' AND v.estado_pago IN ('PENDIENTE', 'PARCIAL')
         ORDER BY v.fecha DESC
     """).fetchall()
-    
+
     total_por_cobrar = sum(v['total'] - (v['abono'] or 0) for v in ventas_credito)
-    
+
+    conn.close()
+
     return render_template("reportes.html", ventas_prod=ventas_prod, costos_cat=costos_cat,
                            total_ventas=total_ventas, total_costos=total_costos, ganancia=ganancia,
                            top_clientes=top_clientes, ventas_pendientes=ventas_pendientes,
-                           total_pendiente=total_pendiente, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
+                           total_pendiente=total_pendiente, total_por_cobrar=total_por_cobrar,
+                           fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
 
 # ========================
 # GRÁFICAS
