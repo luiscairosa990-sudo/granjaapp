@@ -131,8 +131,6 @@ def init_db():
         estado TEXT DEFAULT 'ACTIVA' CHECK(estado IN ('ACTIVA', 'ANULADA')),
         estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         abono REAL DEFAULT 0,
-        fecha_pago TEXT,
-        estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         monto_pagado REAL DEFAULT 0,
         fecha_pago TEXT,
         factura_numero TEXT,
@@ -619,7 +617,7 @@ def ventas():
         FROM ventas v JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id ORDER BY v.id DESC
     """).fetchall()
-    # Ventas pendientes de pago para mostrar alertas
+    # Ventas pendientes de pago
     ventas_pendientes = c.execute("""
         SELECT v.*, p.nombre as producto, c.nombre as cliente
         FROM ventas v JOIN productos p ON v.producto_id = p.id
