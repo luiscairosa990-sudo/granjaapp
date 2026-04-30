@@ -131,8 +131,6 @@ def init_db():
         estado TEXT DEFAULT 'ACTIVA' CHECK(estado IN ('ACTIVA', 'ANULADA')),
         estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         abono REAL DEFAULT 0,
-        fecha_pago TEXT,
-        estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         monto_pagado REAL DEFAULT 0,
         fecha_pago TEXT,
         factura_numero TEXT,
