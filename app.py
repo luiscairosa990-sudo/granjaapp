@@ -1,9 +1,11 @@
 from flask import Flask, render_template, request, redirect, send_file, session, jsonify, flash, url_for
-import sqlite3
 import os
 import hashlib
 from datetime import datetime, date, timedelta
 from functools import wraps
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import urllib.parse
 
 import matplotlib
 matplotlib.use('Agg')
@@ -17,14 +19,18 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 app = Flask(__name__)
-app.secret_key = "granja_segura_2024_v2"
+app.secret_key = os.environ.get("SECRET_KEY", "granja_segura_2024_v2")
 app.config['JSON_AS_ASCII'] = False
 
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "granja.db")
-
+# ========== CONFIGURACIÓN POSTGRESQL ==========
 def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
+    """Conexión a PostgreSQL usando DATABASE_URL de Render"""
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        # Fallback para desarrollo local
+        database_url = "postgresql://granja_user:granja_pass@localhost:5432/granja_db"
+
+    conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
     return conn
 
 def login_required(f):
@@ -66,7 +72,7 @@ def init_db():
 
     # USUARIOS
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         nombre TEXT NOT NULL,
@@ -76,8 +82,8 @@ def init_db():
 
     # TABLAS PRINCIPALES
     c.execute('''CREATE TABLE IF NOT EXISTS gallinas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
         tipo TEXT NOT NULL CHECK(tipo IN ('ingreso', 'muerte', 'venta')),
         cantidad INTEGER NOT NULL,
         notas TEXT,
@@ -85,8 +91,8 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS huevos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
         cantidad INTEGER NOT NULL,
         calidad TEXT DEFAULT 'A',
         notas TEXT,
@@ -94,8 +100,8 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS alimento (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
         tipo TEXT NOT NULL CHECK(tipo IN ('gallinas', 'pollos')),
         cantidad_kg REAL NOT NULL,
         costo REAL NOT NULL,
@@ -105,24 +111,24 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS clientes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         nombre TEXT NOT NULL,
         telefono TEXT,
         email TEXT,
         direccion TEXT,
-        fecha_registro TEXT DEFAULT CURRENT_DATE
+        fecha_registro DATE DEFAULT CURRENT_DATE
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS productos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         nombre TEXT NOT NULL,
         tipo TEXT NOT NULL,
         unidad TEXT DEFAULT 'unidad'
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS ventas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
         producto_id INTEGER NOT NULL,
         cliente_id INTEGER,
         cantidad REAL NOT NULL,
@@ -132,7 +138,7 @@ def init_db():
         estado_pago TEXT DEFAULT 'PENDIENTE' CHECK(estado_pago IN ('PENDIENTE', 'PARCIAL', 'PAGADO')),
         abono REAL DEFAULT 0,
         monto_pagado REAL DEFAULT 0,
-        fecha_pago TEXT,
+        fecha_pago DATE,
         factura_numero TEXT,
         usuario_id INTEGER,
         FOREIGN KEY (producto_id) REFERENCES productos(id),
@@ -140,8 +146,8 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS costos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        fecha DATE NOT NULL,
         categoria TEXT NOT NULL CHECK(categoria IN ('alimento', 'medicina', 'empaque', 'mano_obra', 'transporte', 'pollitos', 'otros')),
         descripcion TEXT NOT NULL,
         valor REAL NOT NULL,
@@ -149,9 +155,9 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS pollos_crianza (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         lote TEXT UNIQUE NOT NULL,
-        fecha_ingreso TEXT NOT NULL,
+        fecha_ingreso DATE NOT NULL,
         cantidad_inicial INTEGER NOT NULL,
         cantidad_actual INTEGER NOT NULL,
         peso_inicial REAL NOT NULL,
@@ -160,9 +166,9 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS control_peso (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         crianza_id INTEGER NOT NULL,
-        fecha TEXT NOT NULL,
+        fecha DATE NOT NULL,
         semana INTEGER NOT NULL,
         peso_promedio REAL NOT NULL,
         cantidad_viva INTEGER NOT NULL,
@@ -173,18 +179,18 @@ def init_db():
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS costos_preparacion (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         crianza_id INTEGER NOT NULL,
-        fecha TEXT NOT NULL,
+        fecha DATE NOT NULL,
         descripcion TEXT NOT NULL,
         valor REAL NOT NULL,
         FOREIGN KEY (crianza_id) REFERENCES pollos_crianza(id)
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS pollos_listos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         crianza_id INTEGER NOT NULL,
-        fecha_listo TEXT NOT NULL,
+        fecha_listo DATE NOT NULL,
         cantidad INTEGER NOT NULL,
         peso_promedio REAL NOT NULL,
         costo_total REAL DEFAULT 0,
@@ -194,30 +200,29 @@ def init_db():
     )''')
 
     # DATOS BASE
-    existe = c.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM productos")
+    existe = c.fetchone()['count']
     if existe == 0:
-        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES ('Huevos', 'huevo', 'unidad')")
-        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES ('Pollos de Engorde', 'pollo', 'unidad')")
-        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES ('Pollo por Libra', 'pollo_libra', 'libra')")
+        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES (%s,%s,%s)",
+                  ('Huevos', 'huevo', 'unidad'))
+        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES (%s,%s,%s)",
+                  ('Pollos de Engorde', 'pollo', 'unidad'))
+        c.execute("INSERT INTO productos (nombre, tipo, unidad) VALUES (%s,%s,%s)",
+                  ('Pollo por Libra', 'pollo_libra', 'libra'))
 
     # USUARIOS BASE
-    existe_u = c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM usuarios")
+    existe_u = c.fetchone()['count']
     if existe_u == 0:
-        c.execute("INSERT INTO usuarios (username, password, nombre, rol) VALUES (?,?,?,?)",
+        c.execute("INSERT INTO usuarios (username, password, nombre, rol) VALUES (%s,%s,%s,%s)",
                   ("admin", hash_password("1234"), "Administrador", "admin"))
-        c.execute("INSERT INTO usuarios (username, password, nombre, rol) VALUES (?,?,?,?)",
+        c.execute("INSERT INTO usuarios (username, password, nombre, rol) VALUES (%s,%s,%s,%s)",
                   ("operario", hash_password("1234"), "Operario de Granja", "operario"))
 
     conn.commit()
     conn.close()
 
 init_db()
-
-@app.before_request
-def before_request():
-    # Asegurar que la base de datos existe antes de cada request
-    if not os.path.exists(DB):
-        init_db()
 
 # ========================
 # UTILIDADES
@@ -227,36 +232,46 @@ def get_factura_numero():
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM ventas WHERE estado='ACTIVA'")
-    count = c.fetchone()[0] + 1
+    count = c.fetchone()['count'] + 1
     conn.close()
     return f"F-{datetime.now().strftime('%Y%m')}-{str(count).zfill(4)}"
 
 def get_gallinas_total():
     conn = get_db()
     c = conn.cursor()
-    total = c.execute("""
+    c.execute("""
         SELECT SUM(CASE 
             WHEN tipo='ingreso' THEN cantidad 
             WHEN tipo IN ('muerte', 'venta') THEN -cantidad 
-        END) 
+        END) as total
         FROM gallinas
-    """).fetchone()[0] or 0
+    """)
+    result = c.fetchone()
+    total = result['total'] if result and result['total'] else 0
     conn.close()
     return total
 
 def get_huevos_disponibles():
     conn = get_db()
     c = conn.cursor()
-    producidos = c.execute("SELECT SUM(cantidad) FROM huevos").fetchone()[0] or 0
-    vendidos = c.execute("SELECT SUM(cantidad) FROM ventas WHERE producto_id=1 AND estado='ACTIVA'").fetchone()[0] or 0
+    c.execute("SELECT SUM(cantidad) as total FROM huevos")
+    result = c.fetchone()
+    producidos = result['total'] if result and result['total'] else 0
+    c.execute("SELECT SUM(cantidad) as total FROM ventas WHERE producto_id=1 AND estado='ACTIVA'")
+    result = c.fetchone()
+    vendidos = result['total'] if result and result['total'] else 0
     conn.close()
     return producidos - vendidos
 
 def get_pollos_disponibles():
     conn = get_db()
     c = conn.cursor()
-    listos = c.execute("SELECT SUM(cantidad) FROM pollos_listos WHERE estado='DISPONIBLE'").fetchone()[0] or 0
-    vendidos = c.execute("SELECT SUM(cantidad) FROM ventas WHERE producto_id=2 AND estado='ACTIVA'").fetchone()[0] or 0
+    c.execute("SELECT SUM(cantidad) as total FROM pollos_listos WHERE estado='DISPONIBLE'")
+    result = c.fetchone()
+    listos = result['total'] if result and result['total'] else 0
+    c.execute("SELECT SUM(cantidad) as total FROM ventas WHERE producto_id=2 AND estado='ACTIVA'")
+    result = c.fetchone()
+    vendidos = result['total'] if result and result['total'] else 0
     conn.close()
     return listos - vendidos
 
@@ -264,16 +279,20 @@ def get_costos_total(tipo=None):
     conn = get_db()
     c = conn.cursor()
     if tipo:
-        total = c.execute("SELECT SUM(valor) FROM costos WHERE producto_relacionado=?", (tipo,)).fetchone()[0] or 0
+        c.execute("SELECT SUM(valor) as total FROM costos WHERE producto_relacionado=%s", (tipo,))
     else:
-        total = c.execute("SELECT SUM(valor) FROM costos").fetchone()[0] or 0
+        c.execute("SELECT SUM(valor) as total FROM costos")
+    result = c.fetchone()
+    total = result['total'] if result and result['total'] else 0
     conn.close()
     return total
 
 def get_ventas_total():
     conn = get_db()
     c = conn.cursor()
-    total = c.execute("SELECT SUM(total) FROM ventas WHERE estado='ACTIVA'").fetchone()[0] or 0
+    c.execute("SELECT SUM(total) as total FROM ventas WHERE estado='ACTIVA'")
+    result = c.fetchone()
+    total = result['total'] if result and result['total'] else 0
     conn.close()
     return total
 
@@ -291,8 +310,9 @@ def login():
         password = request.form.get('password', '')
         conn = get_db()
         c = conn.cursor()
-        row = c.execute("SELECT * FROM usuarios WHERE username=? AND password=? AND activo=1",
-                        (user, hash_password(password))).fetchone()
+        c.execute("SELECT * FROM usuarios WHERE username=%s AND password=%s AND activo=1",
+                    (user, hash_password(password)))
+        row = c.fetchone()
         conn.close()
         if row:
             session['user_id'] = row['id']
@@ -338,19 +358,22 @@ def index():
     if ganancia < 0 and session.get('rol') == 'admin':
         alertas.append({"tipo": "danger", "msg": f"📉 Pérdidas detectadas: ${ganancia:,.2f}"})
 
-    ventas_mes = c.execute("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(total) as total 
+    c.execute("""
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(total) as total 
         FROM ventas WHERE estado='ACTIVA' 
         GROUP BY mes ORDER BY mes DESC LIMIT 6
-    """).fetchall()
+    """)
+    ventas_mes = c.fetchall()
 
-    huevos_mes = c.execute("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(cantidad) as total 
+    c.execute("""
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(cantidad) as total 
         FROM huevos 
         GROUP BY mes ORDER BY mes DESC LIMIT 6
-    """).fetchall()
+    """)
+    huevos_mes = c.fetchall()
 
-    crianzas = c.execute("SELECT * FROM pollos_crianza WHERE estado='ACTIVO' ORDER BY fecha_ingreso DESC").fetchall()
+    c.execute("SELECT * FROM pollos_crianza WHERE estado='ACTIVO' ORDER BY fecha_ingreso DESC")
+    crianzas = c.fetchall()
 
     conn.close()
 
@@ -380,7 +403,7 @@ def gallinas():
         try:
             c.execute("""
                 INSERT INTO gallinas (fecha, tipo, cantidad, notas, usuario_id) 
-                VALUES (?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s)
             """, (
                 request.form.get('fecha', date.today().isoformat()),
                 request.form['tipo'],
@@ -394,7 +417,8 @@ def gallinas():
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('gallinas'))
 
-    data = c.execute("SELECT g.*, u.nombre as usuario FROM gallinas g LEFT JOIN usuarios u ON g.usuario_id=u.id ORDER BY fecha DESC").fetchall()
+    c.execute("SELECT g.*, u.nombre as usuario FROM gallinas g LEFT JOIN usuarios u ON g.usuario_id=u.id ORDER BY fecha DESC")
+    data = c.fetchall()
     total = get_gallinas_total()
     conn.close()
     return render_template("gallinas.html", data=data, total=total)
@@ -405,13 +429,14 @@ def editar_gallina(id):
     conn = get_db()
     c = conn.cursor()
     if request.method == 'POST':
-        c.execute("""UPDATE gallinas SET fecha=?, tipo=?, cantidad=?, notas=? WHERE id=?""",
+        c.execute("""UPDATE gallinas SET fecha=%s, tipo=%s, cantidad=%s, notas=%s WHERE id=%s""",
                   (request.form['fecha'], request.form['tipo'], int(request.form['cantidad']),
                    request.form.get('notas', ''), id))
         conn.commit()
         flash("Registro actualizado", "success")
         return redirect(url_for('gallinas'))
-    data = c.execute("SELECT * FROM gallinas WHERE id=?", (id,)).fetchone()
+    c.execute("SELECT * FROM gallinas WHERE id=%s", (id,))
+    data = c.fetchone()
     conn.close()
     return render_template("editar_gallina.html", d=data)
 
@@ -420,7 +445,7 @@ def editar_gallina(id):
 def eliminar_gallina(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM gallinas WHERE id=?", (id,))
+    c.execute("DELETE FROM gallinas WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Registro eliminado", "info")
@@ -440,7 +465,7 @@ def alimento():
         try:
             c.execute("""
                 INSERT INTO alimento (fecha, tipo, cantidad_kg, costo, proveedor, notas, usuario_id)
-                VALUES (?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
             """, (
                 request.form.get('fecha', date.today().isoformat()),
                 request.form['tipo'],
@@ -456,11 +481,13 @@ def alimento():
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('alimento'))
 
-    data = c.execute("SELECT a.*, u.nombre as usuario FROM alimento a LEFT JOIN usuarios u ON a.usuario_id=u.id ORDER BY fecha DESC").fetchall()
-    gasto_mes = c.execute("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(costo) as total
+    c.execute("SELECT a.*, u.nombre as usuario FROM alimento a LEFT JOIN usuarios u ON a.usuario_id=u.id ORDER BY fecha DESC")
+    data = c.fetchall()
+    c.execute("""
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(costo) as total
         FROM alimento GROUP BY mes ORDER BY mes DESC LIMIT 12
-    """).fetchall()
+    """)
+    gasto_mes = c.fetchall()
     conn.close()
     return render_template("alimento.html", data=data, gasto_mes=gasto_mes)
 
@@ -469,7 +496,7 @@ def alimento():
 def eliminar_alimento(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM alimento WHERE id=?", (id,))
+    c.execute("DELETE FROM alimento WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Registro eliminado", "info")
@@ -489,7 +516,7 @@ def huevos():
         try:
             c.execute("""
                 INSERT INTO huevos (fecha, cantidad, calidad, notas, usuario_id)
-                VALUES (?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s)
             """, (
                 request.form.get('fecha', date.today().isoformat()),
                 int(request.form['cantidad']),
@@ -503,17 +530,19 @@ def huevos():
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('huevos'))
 
-    data = c.execute("""
+    c.execute("""
         SELECT h.*, u.nombre as usuario 
         FROM huevos h 
         LEFT JOIN usuarios u ON h.usuario_id=u.id 
         ORDER BY fecha DESC
-    """).fetchall()
+    """)
+    data = c.fetchall()
     total_disponible = get_huevos_disponibles()
-    prod_mes = c.execute("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(cantidad) as total
+    c.execute("""
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(cantidad) as total
         FROM huevos GROUP BY mes ORDER BY mes DESC LIMIT 12
-    """).fetchall()
+    """)
+    prod_mes = c.fetchall()
     conn.close()
     return render_template("huevos.html", data=data, total=total_disponible, prod_mes=prod_mes)
 
@@ -522,7 +551,7 @@ def huevos():
 def eliminar_huevo(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM huevos WHERE id=?", (id,))
+    c.execute("DELETE FROM huevos WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Registro eliminado", "info")
@@ -541,7 +570,7 @@ def clientes():
         try:
             c.execute("""
                 INSERT INTO clientes (nombre, telefono, email, direccion)
-                VALUES (?,?,?,?)
+                VALUES (%s,%s,%s,%s)
             """, (request.form['nombre'], request.form.get('telefono', ''),
                   request.form.get('email', ''), request.form.get('direccion', '')))
             conn.commit()
@@ -549,7 +578,8 @@ def clientes():
         except Exception as e:
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('clientes'))
-    data = c.execute("SELECT * FROM clientes ORDER BY nombre").fetchall()
+    c.execute("SELECT * FROM clientes ORDER BY nombre")
+    data = c.fetchall()
     conn.close()
     return render_template("clientes.html", data=data)
 
@@ -558,7 +588,7 @@ def clientes():
 def eliminar_cliente(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM clientes WHERE id=?", (id,))
+    c.execute("DELETE FROM clientes WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Cliente eliminado", "info")
@@ -595,7 +625,7 @@ def ventas():
             factura = get_factura_numero()
             c.execute("""
                 INSERT INTO ventas (fecha, producto_id, cliente_id, cantidad, precio_unitario, total, estado_pago, fecha_pago, factura_numero, usuario_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 request.form.get('fecha', date.today().isoformat()),
                 producto_id, request.form.get('cliente') or None,
@@ -610,21 +640,25 @@ def ventas():
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('ventas'))
 
-    productos = c.execute("SELECT * FROM productos").fetchall()
-    clientes_list = c.execute("SELECT * FROM clientes ORDER BY nombre").fetchall()
-    data = c.execute("""
+    c.execute("SELECT * FROM productos")
+    productos = c.fetchall()
+    c.execute("SELECT * FROM clientes ORDER BY nombre")
+    clientes_list = c.fetchall()
+    c.execute("""
         SELECT v.*, p.nombre as producto, p.unidad, c.nombre as cliente
         FROM ventas v JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id ORDER BY v.id DESC
-    """).fetchall()
+    """)
+    data = c.fetchall()
     # Ventas pendientes de pago
-    ventas_pendientes = c.execute("""
+    c.execute("""
         SELECT v.*, p.nombre as producto, c.nombre as cliente
         FROM ventas v JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id
         WHERE v.estado='ACTIVA' AND v.estado_pago IN ('PENDIENTE', 'PARCIAL')
         ORDER BY v.fecha DESC
-    """).fetchall()
+    """)
+    ventas_pendientes = c.fetchall()
     conn.close()
     return render_template("ventas.html", data=data, productos=productos, clientes=clientes_list, pendientes=ventas_pendientes)
 
@@ -637,16 +671,19 @@ def editar_venta(id):
         cantidad = float(request.form['cantidad'])
         precio = float(request.form['precio'])
         total = cantidad * precio
-        c.execute("""UPDATE ventas SET fecha=?, producto_id=?, cliente_id=?, cantidad=?, 
-                    precio_unitario=?, total=? WHERE id=?""",
+        c.execute("""UPDATE ventas SET fecha=%s, producto_id=%s, cliente_id=%s, cantidad=%s, 
+                    precio_unitario=%s, total=%s WHERE id=%s""",
                   (request.form['fecha'], request.form['producto'],
                    request.form.get('cliente') or None, cantidad, precio, total, id))
         conn.commit()
         flash("Venta actualizada", "success")
         return redirect(url_for('ventas'))
-    venta = c.execute("SELECT * FROM ventas WHERE id=?", (id,)).fetchone()
-    productos = c.execute("SELECT * FROM productos").fetchall()
-    clientes_list = c.execute("SELECT * FROM clientes ORDER BY nombre").fetchall()
+    c.execute("SELECT * FROM ventas WHERE id=%s", (id,))
+    venta = c.fetchone()
+    c.execute("SELECT * FROM productos")
+    productos = c.fetchall()
+    c.execute("SELECT * FROM clientes ORDER BY nombre")
+    clientes_list = c.fetchall()
     conn.close()
     return render_template("editar_venta.html", venta=venta, productos=productos, clientes=clientes_list)
 
@@ -655,7 +692,7 @@ def editar_venta(id):
 def anular_venta(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE ventas SET estado='ANULADA' WHERE id=?", (id,))
+    c.execute("UPDATE ventas SET estado='ANULADA' WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Venta anulada", "warning")
@@ -667,7 +704,8 @@ def registrar_pago(id):
     conn = get_db()
     c = conn.cursor()
 
-    venta = c.execute("SELECT * FROM ventas WHERE id=?", (id,)).fetchone()
+    c.execute("SELECT * FROM ventas WHERE id=%s", (id,))
+    venta = c.fetchone()
     if not venta:
         flash("Venta no encontrada", "danger")
         return redirect(url_for('ventas'))
@@ -686,7 +724,7 @@ def registrar_pago(id):
             else:
                 estado_pago = 'PARCIAL'
 
-            c.execute('''UPDATE ventas SET abono=?, estado_pago=?, fecha_pago=? WHERE id=?''',
+            c.execute('''UPDATE ventas SET abono=%s, estado_pago=%s, fecha_pago=%s WHERE id=%s''',
                       (nuevo_abono, estado_pago, fecha_pago, id))
             conn.commit()
             flash(f"Pago registrado: ${monto:,.2f}. Saldo restante: ${nuevo_saldo:,.2f}", "success")
@@ -702,7 +740,7 @@ def registrar_pago(id):
 def marcar_pagado(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE ventas SET estado_pago='PAGADO', fecha_pago=? WHERE id=?", 
+    c.execute("UPDATE ventas SET estado_pago='PAGADO', fecha_pago=%s WHERE id=%s", 
               (date.today().isoformat(), id))
     conn.commit()
     conn.close()
@@ -714,7 +752,8 @@ def marcar_pagado(id):
 def actualizar_pago(id):
     conn = get_db()
     c = conn.cursor()
-    venta = c.execute("SELECT * FROM ventas WHERE id=?", (id,)).fetchone()
+    c.execute("SELECT * FROM ventas WHERE id=%s", (id,))
+    venta = c.fetchone()
 
     if request.method == 'POST':
         try:
@@ -730,7 +769,7 @@ def actualizar_pago(id):
                 monto_pagado = 0
                 fecha_pago = None
 
-            c.execute('''UPDATE ventas SET estado_pago=?, monto_pagado=?, fecha_pago=? WHERE id=?''',
+            c.execute('''UPDATE ventas SET estado_pago=%s, monto_pagado=%s, fecha_pago=%s WHERE id=%s''',
                       (estado_pago, monto_pagado, fecha_pago, id))
             conn.commit()
             flash(f"Estado de pago actualizado a: {estado_pago}", "success")
@@ -750,12 +789,13 @@ def actualizar_pago(id):
 def factura(id):
     conn = get_db()
     c = conn.cursor()
-    venta = c.execute("""
+    c.execute("""
         SELECT v.*, p.nombre as producto, p.unidad, c.nombre as cliente, 
                c.telefono, c.direccion
         FROM ventas v JOIN productos p ON v.producto_id = p.id
-        LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id=?
-    """, (id,)).fetchone()
+        LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id=%s
+    """, (id,))
+    venta = c.fetchone()
     conn.close()
     if not venta:
         return "Venta no encontrada", 404
@@ -819,18 +859,19 @@ def pollos_crianza():
             cantidad = int(request.form['cantidad'])
             c.execute("""
                 INSERT INTO pollos_crianza (lote, fecha_ingreso, cantidad_inicial, cantidad_actual, peso_inicial, costo_pollitos)
-                VALUES (?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s)
             """, (lote, request.form.get('fecha', date.today().isoformat()), cantidad, cantidad,
                   float(request.form['peso']), float(request.form.get('costo', 0))))
             conn.commit()
             flash("Lote registrado", "success")
-        except sqlite3.IntegrityError:
+        except psycopg2.IntegrityError:
             flash("El lote ya existe", "danger")
         except Exception as e:
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('pollos_crianza'))
 
-    data = c.execute("SELECT * FROM pollos_crianza ORDER BY fecha_ingreso DESC").fetchall()
+    c.execute("SELECT * FROM pollos_crianza ORDER BY fecha_ingreso DESC")
+    data = c.fetchall()
     conn.close()
     return render_template("pollos_crianza.html", data=data)
 
@@ -839,9 +880,9 @@ def pollos_crianza():
 def eliminar_crianza(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM pollos_crianza WHERE id=?", (id,))
-    c.execute("DELETE FROM control_peso WHERE crianza_id=?", (id,))
-    c.execute("DELETE FROM costos_preparacion WHERE crianza_id=?", (id,))
+    c.execute("DELETE FROM pollos_crianza WHERE id=%s", (id,))
+    c.execute("DELETE FROM control_peso WHERE crianza_id=%s", (id,))
+    c.execute("DELETE FROM costos_preparacion WHERE crianza_id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Lote eliminado", "info")
@@ -856,7 +897,8 @@ def eliminar_crianza(id):
 def control_peso(crianza_id):
     conn = get_db()
     c = conn.cursor()
-    crianza = c.execute("SELECT * FROM pollos_crianza WHERE id=?", (crianza_id,)).fetchone()
+    c.execute("SELECT * FROM pollos_crianza WHERE id=%s", (crianza_id,))
+    crianza = c.fetchone()
     if not crianza:
         flash("Lote no encontrado", "danger")
         return redirect(url_for('pollos_crianza'))
@@ -868,24 +910,25 @@ def control_peso(crianza_id):
             mortalidad = crianza['cantidad_actual'] - cantidad_viva
             c.execute("""
                 INSERT INTO control_peso (crianza_id, fecha, semana, peso_promedio, cantidad_viva, alimento_consumido_kg, mortalidad, usuario_id)
-                VALUES (?,?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """, (crianza_id, request.form.get('fecha', date.today().isoformat()), semana,
                   float(request.form['peso']), cantidad_viva,
                   float(request.form.get('alimento', 0)),
                   mortalidad if mortalidad > 0 else 0, get_user_id()))
-            c.execute("UPDATE pollos_crianza SET cantidad_actual=? WHERE id=?", (cantidad_viva, crianza_id))
+            c.execute("UPDATE pollos_crianza SET cantidad_actual=%s WHERE id=%s", (cantidad_viva, crianza_id))
             conn.commit()
             flash(f"Control semana {semana} registrado. Mortalidad: {mortalidad}", "success")
         except Exception as e:
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('control_peso', crianza_id=crianza_id))
 
-    data = c.execute("""
+    c.execute("""
         SELECT cp.*, u.nombre as usuario 
         FROM control_peso cp 
         LEFT JOIN usuarios u ON cp.usuario_id=u.id 
-        WHERE cp.crianza_id=? ORDER BY semana
-    """, (crianza_id,)).fetchall()
+        WHERE cp.crianza_id=%s ORDER BY semana
+    """, (crianza_id,))
+    data = c.fetchall()
     conn.close()
     return render_template("control_peso.html", data=data, crianza=crianza, crianza_id=crianza_id)
 
@@ -894,9 +937,10 @@ def control_peso(crianza_id):
 def eliminar_control(id):
     conn = get_db()
     c = conn.cursor()
-    row = c.execute("SELECT crianza_id FROM control_peso WHERE id=?", (id,)).fetchone()
-    crianza_id = row[0] if row else 0
-    c.execute("DELETE FROM control_peso WHERE id=?", (id,))
+    c.execute("SELECT crianza_id FROM control_peso WHERE id=%s", (id,))
+    row = c.fetchone()
+    crianza_id = row['crianza_id'] if row else 0
+    c.execute("DELETE FROM control_peso WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Registro eliminado", "info")
@@ -915,7 +959,7 @@ def costos_preparacion(crianza_id):
         try:
             c.execute("""
                 INSERT INTO costos_preparacion (crianza_id, fecha, descripcion, valor)
-                VALUES (?,?,?,?)
+                VALUES (%s,%s,%s,%s)
             """, (crianza_id, request.form.get('fecha', date.today().isoformat()),
                   request.form['descripcion'], float(request.form['valor'])))
             conn.commit()
@@ -924,8 +968,11 @@ def costos_preparacion(crianza_id):
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('costos_preparacion', crianza_id=crianza_id))
 
-    data = c.execute("SELECT * FROM costos_preparacion WHERE crianza_id=? ORDER BY fecha", (crianza_id,)).fetchall()
-    total = c.execute("SELECT SUM(valor) FROM costos_preparacion WHERE crianza_id=?", (crianza_id,)).fetchone()[0] or 0
+    c.execute("SELECT * FROM costos_preparacion WHERE crianza_id=%s ORDER BY fecha", (crianza_id,))
+    data = c.fetchall()
+    c.execute("SELECT SUM(valor) as total FROM costos_preparacion WHERE crianza_id=%s", (crianza_id,))
+    result = c.fetchone()
+    total = result['total'] if result and result['total'] else 0
     conn.close()
     return render_template("costos_preparacion.html", data=data, total=total, crianza_id=crianza_id)
 
@@ -938,7 +985,8 @@ def costos_preparacion(crianza_id):
 def pasar_listo(crianza_id):
     conn = get_db()
     c = conn.cursor()
-    crianza = c.execute("SELECT * FROM pollos_crianza WHERE id=?", (crianza_id,)).fetchone()
+    c.execute("SELECT * FROM pollos_crianza WHERE id=%s", (crianza_id,))
+    crianza = c.fetchone()
     if not crianza:
         flash("Lote no encontrado", "danger")
         return redirect(url_for('pollos_crianza'))
@@ -949,21 +997,26 @@ def pasar_listo(crianza_id):
             peso = float(request.form['peso'])
             precio = float(request.form['precio'])
             costo_pollitos = crianza['costo_pollitos'] or 0
-            costo_alimento = c.execute("SELECT SUM(costo) FROM alimento WHERE tipo='pollos'").fetchone()[0] or 0
-            costo_prep = c.execute("SELECT SUM(valor) FROM costos_preparacion WHERE crianza_id=?", (crianza_id,)).fetchone()[0] or 0
+            c.execute("SELECT SUM(costo) as total FROM alimento WHERE tipo='pollos'")
+            result = c.fetchone()
+            costo_alimento = result['total'] if result and result['total'] else 0
+            c.execute("SELECT SUM(valor) as total FROM costos_preparacion WHERE crianza_id=%s", (crianza_id,))
+            result = c.fetchone()
+            costo_prep = result['total'] if result and result['total'] else 0
             costo_total = costo_pollitos + costo_alimento + costo_prep
             c.execute("""
                 INSERT INTO pollos_listos (crianza_id, fecha_listo, cantidad, peso_promedio, costo_total, precio_venta_unitario)
-                VALUES (?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s)
             """, (crianza_id, date.today().isoformat(), cantidad, peso, costo_total, precio))
-            c.execute("UPDATE pollos_crianza SET estado='FINALIZADO' WHERE id=?", (crianza_id,))
+            c.execute("UPDATE pollos_crianza SET estado='FINALIZADO' WHERE id=%s", (crianza_id,))
             conn.commit()
             flash("Lote pasado a disponible para venta", "success")
             return redirect(url_for('pollos_listos'))
         except Exception as e:
             flash(f"Error: {str(e)}", "danger")
 
-    ultimo = c.execute("SELECT * FROM control_peso WHERE crianza_id=? ORDER BY semana DESC LIMIT 1", (crianza_id,)).fetchone()
+    c.execute("SELECT * FROM control_peso WHERE crianza_id=%s ORDER BY semana DESC LIMIT 1", (crianza_id,))
+    ultimo = c.fetchone()
     conn.close()
     return render_template("pasar_listo.html", crianza=crianza, ultimo=ultimo)
 
@@ -976,11 +1029,12 @@ def pasar_listo(crianza_id):
 def pollos_listos():
     conn = get_db()
     c = conn.cursor()
-    data = c.execute("""
+    c.execute("""
         SELECT pl.*, pc.lote FROM pollos_listos pl
         JOIN pollos_crianza pc ON pl.crianza_id = pc.id
         ORDER BY pl.fecha_listo DESC
-    """).fetchall()
+    """)
+    data = c.fetchall()
     conn.close()
     return render_template("pollos_listos.html", data=data)
 
@@ -997,7 +1051,7 @@ def costos():
         try:
             c.execute("""
                 INSERT INTO costos (fecha, categoria, descripcion, valor, producto_relacionado)
-                VALUES (?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s)
             """, (request.form.get('fecha', date.today().isoformat()), request.form['categoria'],
                   request.form['descripcion'], float(request.form['valor']),
                   request.form.get('producto', 'general')))
@@ -1007,8 +1061,10 @@ def costos():
             flash(f"Error: {str(e)}", "danger")
         return redirect(url_for('costos'))
 
-    data = c.execute("SELECT * FROM costos ORDER BY fecha DESC").fetchall()
-    resumen = c.execute("SELECT categoria, SUM(valor) as total FROM costos GROUP BY categoria").fetchall()
+    c.execute("SELECT * FROM costos ORDER BY fecha DESC")
+    data = c.fetchall()
+    c.execute("SELECT categoria, SUM(valor) as total FROM costos GROUP BY categoria")
+    resumen = c.fetchall()
     conn.close()
     return render_template("costos.html", data=data, resumen=resumen)
 
@@ -1017,7 +1073,7 @@ def costos():
 def eliminar_costo(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM costos WHERE id=?", (id,))
+    c.execute("DELETE FROM costos WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Costo eliminado", "info")
@@ -1035,50 +1091,55 @@ def reportes():
     fecha_inicio = request.args.get('inicio', (date.today() - timedelta(days=30)).isoformat())
     fecha_fin = request.args.get('fin', date.today().isoformat())
 
-    ventas_prod = c.execute("""
+    c.execute("""
         SELECT p.nombre, SUM(v.cantidad) as cantidad, SUM(v.total) as total
         FROM ventas v JOIN productos p ON v.producto_id = p.id
-        WHERE v.estado='ACTIVA' AND v.fecha BETWEEN ? AND ?
+        WHERE v.estado='ACTIVA' AND v.fecha BETWEEN %s AND %s
         GROUP BY p.nombre
-    """, (fecha_inicio, fecha_fin)).fetchall()
+    """, (fecha_inicio, fecha_fin))
+    ventas_prod = c.fetchall()
 
-    costos_cat = c.execute("""
+    c.execute("""
         SELECT categoria, SUM(valor) as total FROM costos
-        WHERE fecha BETWEEN ? AND ? GROUP BY categoria
-    """, (fecha_inicio, fecha_fin)).fetchall()
+        WHERE fecha BETWEEN %s AND %s GROUP BY categoria
+    """, (fecha_inicio, fecha_fin))
+    costos_cat = c.fetchall()
 
     total_ventas = sum(v['total'] for v in ventas_prod) if ventas_prod else 0
     total_costos = sum(c_['total'] for c_ in costos_cat) if costos_cat else 0
     ganancia = total_ventas - total_costos
 
-    top_clientes = c.execute("""
+    c.execute("""
         SELECT c.nombre, SUM(v.total) as total
         FROM ventas v JOIN clientes c ON v.cliente_id = c.id
-        WHERE v.estado='ACTIVA' AND v.fecha BETWEEN ? AND ?
+        WHERE v.estado='ACTIVA' AND v.fecha BETWEEN %s AND %s
         GROUP BY c.nombre ORDER BY total DESC LIMIT 5
-    """, (fecha_inicio, fecha_fin)).fetchall()
+    """, (fecha_inicio, fecha_fin))
+    top_clientes = c.fetchall()
 
     # Ventas pendientes de pago
-    ventas_pendientes = c.execute('''
+    c.execute('''
         SELECT v.*, p.nombre as producto, c.nombre as cliente
-        FROM ventas v 
+        FROM ventas v
         JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id
         WHERE v.estado='ACTIVA' AND v.estado_pago='PENDIENTE'
         ORDER BY v.fecha DESC
-    ''').fetchall()
+    ''')
+    ventas_pendientes = c.fetchall()
 
     total_pendiente = sum(v['total'] for v in ventas_pendientes) if ventas_pendientes else 0
 
     # Ventas a credito (pendientes y parciales)
-    ventas_credito = c.execute("""
+    c.execute("""
         SELECT v.*, p.nombre as producto, c.nombre as cliente
         FROM ventas v
         JOIN productos p ON v.producto_id = p.id
         LEFT JOIN clientes c ON v.cliente_id = c.id
         WHERE v.estado='ACTIVA' AND v.estado_pago IN ('PENDIENTE', 'PARCIAL')
         ORDER BY v.fecha DESC
-    """).fetchall()
+    """)
+    ventas_credito = c.fetchall()
 
     total_por_cobrar = sum(v['total'] - (v['abono'] or 0) for v in ventas_credito)
 
@@ -1100,7 +1161,7 @@ def grafica_ventas():
     conn = get_db()
     df = pd.read_sql_query("""
         SELECT fecha, SUM(total) as total FROM ventas
-        WHERE estado='ACTIVA' AND fecha >= date('now', '-30 days')
+        WHERE estado='ACTIVA' AND fecha >= CURRENT_DATE - INTERVAL '30 days'
         GROUP BY fecha ORDER BY fecha
     """, conn)
     conn.close()
@@ -1127,7 +1188,7 @@ def grafica_huevos():
     conn = get_db()
     df = pd.read_sql_query("""
         SELECT fecha, SUM(cantidad) as total FROM huevos
-        WHERE fecha >= date('now', '-30 days')
+        WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
         GROUP BY fecha ORDER BY fecha
     """, conn)
     conn.close()
@@ -1151,11 +1212,11 @@ def grafica_huevos():
 def grafica_costos_ventas():
     conn = get_db()
     ventas_df = pd.read_sql_query("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(total) as total
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(total) as total
         FROM ventas WHERE estado='ACTIVA' GROUP BY mes ORDER BY mes DESC LIMIT 6
     """, conn)
     costos_df = pd.read_sql_query("""
-        SELECT strftime('%Y-%m', fecha) as mes, SUM(valor) as total
+        SELECT TO_CHAR(fecha, 'YYYY-MM') as mes, SUM(valor) as total
         FROM costos GROUP BY mes ORDER BY mes DESC LIMIT 6
     """, conn)
     conn.close()
@@ -1248,10 +1309,11 @@ def api_stock(producto_id):
 def api_crianza(crianza_id):
     conn = get_db()
     c = conn.cursor()
-    controles = c.execute("""
+    c.execute("""
         SELECT semana, peso_promedio, cantidad_viva, mortalidad 
-        FROM control_peso WHERE crianza_id=? ORDER BY semana
-    """, (crianza_id,)).fetchall()
+        FROM control_peso WHERE crianza_id=%s ORDER BY semana
+    """, (crianza_id,))
+    controles = c.fetchall()
     conn.close()
     return jsonify([dict(row) for row in controles])
 
@@ -1264,7 +1326,8 @@ def api_crianza(crianza_id):
 def usuarios():
     conn = get_db()
     c = conn.cursor()
-    data = c.execute("SELECT id, username, nombre, rol, activo FROM usuarios ORDER BY rol, nombre").fetchall()
+    c.execute("SELECT id, username, nombre, rol, activo FROM usuarios ORDER BY rol, nombre")
+    data = c.fetchall()
     conn.close()
     return render_template("usuarios.html", data=data)
 
@@ -1277,13 +1340,13 @@ def nuevo_usuario():
         try:
             c.execute("""
                 INSERT INTO usuarios (username, password, nombre, rol)
-                VALUES (?,?,?,?)
+                VALUES (%s,%s,%s,%s)
             """, (request.form['username'], hash_password(request.form['password']),
                   request.form['nombre'], request.form['rol']))
             conn.commit()
             flash("Usuario creado", "success")
             return redirect(url_for('usuarios'))
-        except sqlite3.IntegrityError:
+        except psycopg2.IntegrityError:
             flash("El usuario ya existe", "danger")
         except Exception as e:
             flash(f"Error: {str(e)}", "danger")
@@ -1295,7 +1358,7 @@ def nuevo_usuario():
 def toggle_usuario(id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE usuarios SET activo = CASE WHEN activo=1 THEN 0 ELSE 1 END WHERE id=?", (id,))
+    c.execute("UPDATE usuarios SET activo = CASE WHEN activo=1 THEN 0 ELSE 1 END WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     flash("Estado actualizado", "success")
